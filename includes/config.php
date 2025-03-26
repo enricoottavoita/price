@@ -3,7 +3,7 @@
 
 // Configurazione Database
 define('DB_HOST', 'localhost');
-define('DB_NAME', 'price_api');
+define('DB_NAME', 'name');
 define('DB_USER', 'root');
 define('DB_PASS', '');
 
