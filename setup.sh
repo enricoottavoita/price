@@ -215,7 +215,7 @@ print_success "Directory di installazione create."
 
 # Step 10: Copia dei file
 print_status "Copia dei file del progetto..."
-cp -r "$SOURCE_DIR/price-api/"* "$INSTALL_DIR/" || { 
+cp -r "$SOURCE_DIR/"* "$INSTALL_DIR/" || { 
     print_error "Impossibile copiare i file del progetto."; 
     rm -rf "$TEMP_DIR"; 
     exit 1; 
