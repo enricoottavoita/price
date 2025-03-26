@@ -4,148 +4,115 @@
 // Includi file necessari
 require_once '../includes/config.php';
 require_once '../includes/database.php';
-require_once '../includes/jwt_helper.php';
+require_once '../includes/security/api_security.php';
+require_once '../includes/helpers/request_helper.php';
+require_once '../includes/helpers/jwt_helper.php';
 
-// Imposta headers per la risposta
+// Imposta gli header
 set_api_headers();
+
+// Log della richiesta
+error_log("STORE_PRICE: Richiesta ricevuta");
+error_log("STORE_PRICE: Dati POST: " . file_get_contents('php://input'));
 
 // Verifica il metodo della richiesta
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405); // Method Not Allowed
-    echo json_encode(['error' => 'Metodo non consentito']);
+    http_response_code(405);
+    echo json_encode(['status' => 'error', 'message' => 'Metodo non consentito']);
     exit;
 }
 
-// Ottieni il token Bearer dall'header Authorization
-$token = JWTHelper::getBearerToken();
+// Verifica se la richiesta proviene da uno userscript
+if (!is_userscript_request()) {
+    http_response_code(403);
+    echo json_encode(['status' => 'error', 'message' => 'Accesso non autorizzato']);
+    exit;
+}
 
-// Verifica che il token sia presente
+// Ottieni e verifica il token
+$token = get_bearer_token();
 if (!$token) {
-    http_response_code(401); // Unauthorized
-    echo json_encode(['error' => 'Token di accesso mancante']);
-    exit;
-}
-
-// Valida il token
-$tokenData = JWTHelper::validateToken($token);
-if (!$tokenData) {
-    http_response_code(401); // Unauthorized
-    echo json_encode(['error' => 'Token di accesso non valido o scaduto']);
-    exit;
-}
-
-// Ottieni i dati inviati
-$data = json_decode(file_get_contents('php://input'), true);
-
-// Verifica che i dati siano stati ricevuti correttamente
-if (!$data || !isset($data['asin']) || !isset($data['country']) || !isset($data['price'])) {
-    http_response_code(400); // Bad Request
-    echo json_encode(['error' => 'Dati mancanti o non validi']);
-    exit;
-}
-
-// Pulisci gli input
-$asin = clean_input($data['asin']);
-$country = strtolower(clean_input($data['country']));
-$price = (float)$data['price'];
-$source = isset($data['source']) ? clean_input($data['source']) : 'api';
-
-// Validazione parametri
-if (empty($asin) || !preg_match('/^[A-Z0-9]{10}$/', $asin)) {
-    http_response_code(400); // Bad Request
-    echo json_encode(['error' => 'ASIN non valido']);
-    exit;
-}
-
-$allowed_countries = ['it', 'fr', 'de', 'es'];
-if (!in_array($country, $allowed_countries)) {
-    http_response_code(400); // Bad Request
-    echo json_encode(['error' => 'Paese non supportato']);
-    exit;
-}
-
-if ($price <= 0) {
-    http_response_code(400); // Bad Request
-    echo json_encode(['error' => 'Prezzo non valido']);
+    http_response_code(401);
+    echo json_encode(['status' => 'error', 'message' => 'Token mancante']);
     exit;
 }
 
 try {
+    // Valida il token
+    $payload = JWTHelper::validateToken($token);
+    $user_id = $payload->user_id;
+    
+    // Ottieni i dati dal body della richiesta
+    $data = json_decode(file_get_contents('php://input'), true);
+    
+    // Verifica che i dati necessari siano presenti
+    if (!isset($data['asin']) || !isset($data['country']) || !isset($data['price'])) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Dati mancanti']);
+        exit;
+    }
+    
+    // Pulisci e valida i dati
+    $asin = sanitize_input($data['asin']);
+    $country = sanitize_input($data['country']);
+    $price = (float) $data['price'];
+    $source = isset($data['source']) ? sanitize_input($data['source']) : 'userscript';
+    
+    // Verifica che il prezzo sia valido
+    if ($price <= 0) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Prezzo non valido']);
+        exit;
+    }
+    
+    // Verifica che il paese sia valido
+    if (!in_array($country, ['it', 'de', 'fr', 'es', 'uk'])) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Paese non valido']);
+        exit;
+    }
+    
     // Connessione al database
     $db = new Database();
     $conn = $db->getConnection();
     
-    // Verifica se l'utente esiste e è attivo
-    $stmt = $conn->prepare("SELECT id, status FROM users WHERE id = :id");
-    $stmt->bindParam(':id', $tokenData['sub']);
+    // Ottieni o crea l'ID della fonte
+    $stmt = $conn->prepare("SELECT id FROM sources WHERE name = :name");
+    $stmt->bindParam(':name', $source);
     $stmt->execute();
     
-    if ($stmt->rowCount() === 0) {
-        http_response_code(401); // Unauthorized
-        echo json_encode(['error' => 'Utente non trovato']);
-        exit;
+    if ($stmt->rowCount() > 0) {
+        $source_row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $source_id = $source_row['id'];
+    } else {
+        $stmt = $conn->prepare("INSERT INTO sources (name, created_at) VALUES (:name, NOW())");
+        $stmt->bindParam(':name', $source);
+        $stmt->execute();
+        $source_id = $conn->lastInsertId();
     }
     
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    // Verifica se l'utente è attivo
-    if ($user['status'] !== 1) {
-        http_response_code(403); // Forbidden
-        echo json_encode(['error' => 'Account disattivato']);
-        exit;
-    }
-    
-    // Verifica se il token è stato revocato
-    $stmt = $conn->prepare("SELECT id FROM tokens WHERE token = :token AND revoked = 0 AND (expires_at > NOW() OR expires_at IS NULL)");
-    $stmt->bindParam(':token', $token);
-    $stmt->execute();
-    
-    if ($stmt->rowCount() === 0) {
-        http_response_code(401); // Unauthorized
-        echo json_encode(['error' => 'Token revocato o scaduto']);
-        exit;
-    }
-    
-    // Inserisci il nuovo prezzo
-    $stmt = $conn->prepare("INSERT INTO prices (asin, country, price, source, created_at) VALUES (:asin, :country, :price, :source, NOW())");
+    // Inserisci il prezzo nel database
+    $stmt = $conn->prepare("INSERT INTO prices (asin, country, price, user_id, source_id, created_at, updated_at) 
+                           VALUES (:asin, :country, :price, :user_id, :source_id, NOW(), NOW())");
     $stmt->bindParam(':asin', $asin);
     $stmt->bindParam(':country', $country);
     $stmt->bindParam(':price', $price);
-    $stmt->bindParam(':source', $source);
+    $stmt->bindParam(':user_id', $user_id);
+    $stmt->bindParam(':source_id', $source_id);
     $stmt->execute();
     
-    $price_id = $conn->lastInsertId();
+    // Log del successo
+    error_log("STORE_PRICE: Prezzo salvato - ASIN: {$asin}, Paese: {$country}, Prezzo: {$price}");
     
-    // Registra l'accesso
-    $stmt = $conn->prepare("INSERT INTO api_logs (user_id, endpoint, request_data, response_code, ip_address) VALUES (:user_id, 'store_price', :request_data, 201, :ip_address)");
-    $stmt->bindParam(':user_id', $tokenData['sub']);
-    $request_data = json_encode($data);
-    $stmt->bindParam(':request_data', $request_data);
-    $ip_address = $_SERVER['REMOTE_ADDR'];
-    $stmt->bindParam(':ip_address', $ip_address);
-    $stmt->execute();
-    
-    // Invia la risposta
-    http_response_code(201); // Created
+    // Invia risposta di successo
     echo json_encode([
-        'success' => true,
-        'message' => 'Prezzo aggiunto con successo',
-        'data' => [
-            'id' => $price_id,
-            'asin' => $asin,
-            'country' => $country,
-            'price' => $price,
-            'source' => $source,
-            'timestamp' => time()
-        ]
+        'status' => 'success',
+        'message' => 'Prezzo salvato con successo'
     ]);
     
 } catch (Exception $e) {
-    // Log dell'errore
-    error_log("Errore in store_price.php: " . $e->getMessage());
-    
-    // Invia risposta di errore
-    http_response_code(500); // Internal Server Error
-    echo json_encode(['error' => 'Errore del server']);
+    error_log("STORE_PRICE: Errore - " . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['status' => 'error', 'message' => 'Errore del server']);
 }
 ?>

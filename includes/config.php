@@ -3,14 +3,14 @@
 
 // Configurazione Database
 define('DB_HOST', 'localhost');
-define('DB_NAME', 'name');
+define('DB_NAME', 'price_api');
 define('DB_USER', 'root');
 define('DB_PASS', '');
 
 // Configurazione API
-define('JWT_SECRET', ''); // Questa verrà sostituita con il valore dal database in futuro
+define('JWT_SECRET', 'FQGGHSTdxcVdfdfq123sdfq'); // Questa verrà sostituita con il valore dal database in futuro
 define('JWT_EXPIRY', 86400); // 24 ore in secondi
-define('AUTH_KEY', ''); // Chiave di autenticazione per le API
+define('AUTH_KEY', 'FQGGHSTdxc'); // Chiave di autenticazione per le API
 
 // Impostazioni Timezone
 date_default_timezone_set('Europe/Rome');
