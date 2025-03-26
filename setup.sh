@@ -3,6 +3,7 @@
 # Script di installazione per Price API
 # Autore: Assistant AI
 # Data: 2023
+# Versione: 1.1 (con supporto HTTPS)
 
 # Colori per output
 RED='\033[0;31m'
@@ -215,11 +216,21 @@ print_success "Directory di installazione create."
 
 # Step 10: Copia dei file
 print_status "Copia dei file del progetto..."
-cp -r "$SOURCE_DIR/"* "$INSTALL_DIR/" || { 
-    print_error "Impossibile copiare i file del progetto."; 
-    rm -rf "$TEMP_DIR"; 
-    exit 1; 
-}
+# Modifica: usa la directory corretta in base alla struttura del repository
+# Prova prima con la struttura attesa, poi con la struttura alternativa
+if [ -d "$SOURCE_DIR/price-api" ]; then
+    cp -r "$SOURCE_DIR/price-api/"* "$INSTALL_DIR/" || { 
+        print_error "Impossibile copiare i file del progetto."; 
+        rm -rf "$TEMP_DIR"; 
+        exit 1; 
+    }
+else
+    cp -r "$SOURCE_DIR/"* "$INSTALL_DIR/" || { 
+        print_error "Impossibile copiare i file del progetto."; 
+        rm -rf "$TEMP_DIR"; 
+        exit 1; 
+    }
+fi
 print_success "File copiati correttamente."
 
 # Step 11: Creazione della struttura del database
@@ -448,6 +459,12 @@ if [[ "$configure_vhost" =~ ^[Ss]$ ]]; then
     # Chiedi il nome del dominio
     read -p "Inserisci il nome del dominio (es. price-api.example.com): " domain_name
     
+    # Validazione del nome di dominio
+    if [ -z "$domain_name" ]; then
+        print_warning "Nome di dominio non specificato. Utilizzo di un placeholder: price-api.local"
+        domain_name="price-api.local"
+    fi
+    
     # Creazione del file di configurazione di Apache
     cat > "/etc/apache2/sites-available/price-api.conf" << EOL
 <VirtualHost *:80>
@@ -506,7 +523,180 @@ systemctl restart apache2 || {
 
 print_success "Apache configurato correttamente."
 
-# Step 14: Configurazione del firewall
+# Step 14: Configurazione HTTPS
+print_status "Configurazione HTTPS..."
+
+read -p "Vuoi configurare HTTPS per l'applicazione? [s/N]: " configure_https
+configure_https=${configure_https:-n}
+
+if [[ "$configure_https" =~ ^[Ss]$ ]]; then
+    # Verifica se Let's Encrypt è installato
+    if ! command_exists certbot; then
+        print_warning "Certbot non è installato. Installazione in corso..."
+        apt-get update && apt-get install -y certbot python3-certbot-apache || { 
+            print_error "Impossibile installare Certbot."; 
+            exit 1; 
+        }
+    fi
+    
+    # Verifica se abbiamo un virtual host configurato
+    if [[ "$configure_vhost" =~ ^[Ss]$ ]]; then
+        # Usa il dominio del virtual host
+        ssl_domain="$domain_name"
+    else
+        # Chiedi il dominio per il certificato
+        read -p "Inserisci il nome del dominio per il certificato SSL (es. api.tuodominio.com): " ssl_domain
+    fi
+    
+    if [ -z "$ssl_domain" ]; then
+        print_warning "Nome di dominio non valido per SSL. Utilizzo di un certificato auto-firmato."
+        use_self_signed=true
+    else
+        use_self_signed=false
+        
+        # Verifica che il dominio sia risolvibile
+        print_status "Verifica che il dominio $ssl_domain punti a questo server..."
+        
+        # Ottieni l'IP del server
+        server_ip=$(hostname -I | awk '{print $1}')
+        
+        # Verifica se il dominio risolve all'IP del server
+        domain_ip=$(host -t A "$ssl_domain" 2>/dev/null | grep "has address" | tail -1 | awk '{print $NF}')
+        
+        if [ "$domain_ip" != "$server_ip" ]; then
+            print_warning "Il dominio $ssl_domain non sembra puntare all'IP di questo server ($server_ip)."
+            print_warning "Let's Encrypt potrebbe non funzionare correttamente."
+            
+            read -p "Vuoi continuare comunque con Let's Encrypt? [s/N]: " continue_letsencrypt
+            continue_letsencrypt=${continue_letsencrypt:-n}
+            
+            if [[ ! "$continue_letsencrypt" =~ ^[Ss]$ ]]; then
+                print_warning "Passaggio a certificato auto-firmato."
+                use_self_signed=true
+            fi
+        fi
+    fi
+    
+    if [ "$use_self_signed" = false ]; then
+        # Ottieni il certificato da Let's Encrypt
+        print_status "Ottenimento del certificato SSL da Let's Encrypt..."
+        
+        certbot --apache -d "$ssl_domain" --non-interactive --agree-tos --email "$ADMIN_EMAIL" || {
+            print_warning "Impossibile ottenere il certificato SSL automaticamente."
+            use_self_signed=true
+        }
+    fi
+    
+    if [ "$use_self_signed" = true ]; then
+        print_status "Generazione di un certificato auto-firmato..."
+        
+        # Abilita il modulo SSL
+        a2enmod ssl || { 
+            print_error "Impossibile abilitare il modulo SSL."; 
+            exit 1; 
+        }
+        
+        # Se non abbiamo un dominio, usiamo l'IP del server
+        if [ -z "$ssl_domain" ]; then
+            ssl_domain=$(hostname -I | awk '{print $1}')
+        fi
+        
+        # Genera un certificato auto-firmato
+        mkdir -p /etc/ssl/private
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout /etc/ssl/private/selfsigned.key \
+            -out /etc/ssl/certs/selfsigned.crt \
+            -subj "/CN=$ssl_domain" || {
+            print_error "Impossibile generare il certificato auto-firmato.";
+            exit 1;
+        }
+        
+        # Crea il file di configurazione SSL
+        cat > "/etc/apache2/sites-available/price-api-ssl.conf" << EOL
+<VirtualHost *:443>
+    ServerAdmin $ADMIN_EMAIL
+    ServerName $ssl_domain
+    DocumentRoot $INSTALL_DIR
+    
+    <Directory $INSTALL_DIR>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    
+    SSLEngine on
+    SSLCertificateFile /etc/ssl/certs/selfsigned.crt
+    SSLCertificateKeyFile /etc/ssl/private/selfsigned.key
+    
+    ErrorLog \${APACHE_LOG_DIR}/price-api-ssl_error.log
+    CustomLog \${APACHE_LOG_DIR}/price-api-ssl_access.log combined
+</VirtualHost>
+EOL
+        
+        # Abilita il sito SSL
+        a2ensite price-api-ssl || { 
+            print_error "Impossibile abilitare il sito SSL."; 
+            exit 1; 
+        }
+        
+        print_success "Certificato auto-firmato generato e configurato."
+    fi
+    
+    # Riavvia Apache
+    systemctl restart apache2 || { 
+        print_error "Impossibile riavviare Apache."; 
+        exit 1; 
+    }
+    
+    print_success "HTTPS configurato correttamente."
+    
+    # Aggiorna l'URL base per usare HTTPS
+    if [[ "$BASE_URL" == "http://"* ]]; then
+        BASE_URL="${BASE_URL/http:/https:}"
+        # Aggiorna config.php
+        sed -i "s|define('BASE_URL', '.*');|define('BASE_URL', '$BASE_URL');|" "$INSTALL_DIR/includes/config.php"
+        print_success "URL base aggiornato per utilizzare HTTPS: $BASE_URL"
+    fi
+    
+    # Configura il reindirizzamento da HTTP a HTTPS
+    read -p "Vuoi reindirizzare automaticamente HTTP a HTTPS? [S/n]: " redirect_https
+    redirect_https=${redirect_https:-s}
+    
+        if [[ "$redirect_https" =~ ^[Ss]$ ]]; then
+        print_status "Configurazione del reindirizzamento HTTP → HTTPS..."
+        
+        # Modifica il file del virtual host HTTP
+        if [[ "$configure_vhost" =~ ^[Ss]$ ]]; then
+            # Aggiungi reindirizzamento al virtual host esistente
+            sed -i '/<VirtualHost \*:80>/a \\n    # Reindirizzamento a HTTPS\n    RewriteEngine On\n    RewriteCond %{HTTPS} off\n    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]' /etc/apache2/sites-available/price-api.conf
+        else
+            # Crea un file .htaccess nella directory root per il reindirizzamento
+            cat > "$INSTALL_DIR/.htaccess" << EOL
+# Reindirizzamento a HTTPS
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTPS} off
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
+EOL
+        fi
+        
+        # Abilita il modulo rewrite se non è già abilitato
+        a2enmod rewrite
+        
+        # Riavvia Apache
+        systemctl restart apache2 || { 
+            print_error "Impossibile riavviare Apache."; 
+            exit 1; 
+        }
+        
+        print_success "Reindirizzamento HTTP → HTTPS configurato."
+    fi
+else
+    print_status "HTTPS non configurato. L'applicazione sarà accessibile solo via HTTP."
+fi
+
+# Step 15: Configurazione del firewall
 print_status "Configurazione del firewall..."
 
 # Verifica se ufw è installato
@@ -533,7 +723,7 @@ echo "y" | ufw enable
 
 print_success "Firewall configurato correttamente."
 
-# Step 15: Configurazione della sicurezza
+# Step 16: Configurazione della sicurezza
 print_status "Configurazione delle misure di sicurezza..."
 
 # Crea il file api_security.php
@@ -761,7 +951,7 @@ EOL
 
 print_success "Sicurezza configurata correttamente."
 
-# Step 16: Hardening PHP
+# Step 17: Hardening PHP
 print_status "Configurazione delle impostazioni di sicurezza PHP..."
 
 # Trova il file php.ini
@@ -809,7 +999,7 @@ else
     print_warning "Impossibile trovare il file php.ini. Le impostazioni di sicurezza PHP non sono state configurate."
 fi
 
-# Step 17: Configurazione dei permessi
+# Step 18: Configurazione dei permessi
 print_status "Configurazione dei permessi..."
 
 # Imposta i permessi corretti
@@ -834,7 +1024,7 @@ chmod -R 750 "$INSTALL_DIR/logs" || {
 
 print_success "Permessi configurati correttamente."
 
-# Step 18: Creazione di un utente API di prova
+# Step 19: Creazione di un utente API di prova
 print_status "Creazione di un utente API di prova..."
 
 # Genera un client ID casuale
@@ -845,7 +1035,7 @@ mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "INSERT INTO users (client_id, st
 
 print_success "Utente API di prova creato con Client ID: $CLIENT_ID"
 
-# Step 19: Pulizia e completamento
+# Step 20: Pulizia e completamento
 print_status "Pulizia e completamento dell'installazione..."
 
 # Rimuovi la directory temporanea
@@ -875,6 +1065,25 @@ echo ""
 echo "Credenziali API:"
 echo "  Client ID: $CLIENT_ID"
 echo "  Auth Key: $AUTH_KEY"
+echo ""
+
+# Informazioni HTTPS se configurato
+if [[ "$configure_https" =~ ^[Ss]$ ]]; then
+    echo "Configurazione HTTPS:"
+    if [ "$use_self_signed" = true ]; then
+        echo "  Tipo certificato: Auto-firmato"
+        echo "  Avviso: I browser mostreranno un avviso di sicurezza con questo certificato."
+    else
+        echo "  Tipo certificato: Let's Encrypt"
+        echo "  Rinnovo: Automatico (gestito da Certbot)"
+    fi
+    echo "  Dominio: $ssl_domain"
+    
+    if [[ "$redirect_https" =~ ^[Ss]$ ]]; then
+        echo "  Reindirizzamento: HTTP → HTTPS attivo"
+    fi
+fi
+
 echo ""
 echo "IMPORTANTE: Conserva queste informazioni in un luogo sicuro!"
 echo "=================================================================="
