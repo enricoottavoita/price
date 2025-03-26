@@ -3,7 +3,7 @@
 # Script di installazione per Price API
 # Autore: Assistant AI
 # Data: 2023
-# Versione: 1.1 (con supporto HTTPS)
+# Versione: 1.2 (con supporto HTTPS migliorato)
 
 # Colori per output
 RED='\033[0;31m'
@@ -48,6 +48,13 @@ confirm() {
             false
             ;;
     esac
+}
+
+# Funzione per ripulire un URL/dominio
+clean_domain() {
+    local domain="$1"
+    # Rimuovi http:// o https:// e qualsiasi percorso dopo il dominio
+    echo "$domain" | sed -e 's|^http://||' -e 's|^https://||' -e 's|/.*$||'
 }
 
 # Funzione per generare una password hash PHP (per l'admin)
@@ -459,6 +466,9 @@ if [[ "$configure_vhost" =~ ^[Ss]$ ]]; then
     # Chiedi il nome del dominio
     read -p "Inserisci il nome del dominio (es. price-api.example.com): " domain_name
     
+    # Pulizia e validazione del nome di dominio
+    domain_name=$(clean_domain "$domain_name")
+    
     # Validazione del nome di dominio
     if [ -z "$domain_name" ]; then
         print_warning "Nome di dominio non specificato. Utilizzo di un placeholder: price-api.local"
@@ -541,11 +551,14 @@ if [[ "$configure_https" =~ ^[Ss]$ ]]; then
     
     # Verifica se abbiamo un virtual host configurato
     if [[ "$configure_vhost" =~ ^[Ss]$ ]]; then
-        # Usa il dominio del virtual host
+        # Usa il dominio del virtual host, assicurandosi che sia pulito
         ssl_domain="$domain_name"
+        print_status "Utilizzo del dominio del virtual host per SSL: $ssl_domain"
     else
         # Chiedi il dominio per il certificato
         read -p "Inserisci il nome del dominio per il certificato SSL (es. api.tuodominio.com): " ssl_domain
+        # Pulizia del dominio
+        ssl_domain=$(clean_domain "$ssl_domain")
     fi
     
     if [ -z "$ssl_domain" ]; then
@@ -650,7 +663,7 @@ EOL
     
     print_success "HTTPS configurato correttamente."
     
-    # Aggiorna l'URL base per usare HTTPS
+        # Aggiorna l'URL base per usare HTTPS
     if [[ "$BASE_URL" == "http://"* ]]; then
         BASE_URL="${BASE_URL/http:/https:}"
         # Aggiorna config.php
@@ -662,7 +675,7 @@ EOL
     read -p "Vuoi reindirizzare automaticamente HTTP a HTTPS? [S/n]: " redirect_https
     redirect_https=${redirect_https:-s}
     
-        if [[ "$redirect_https" =~ ^[Ss]$ ]]; then
+    if [[ "$redirect_https" =~ ^[Ss]$ ]]; then
         print_status "Configurazione del reindirizzamento HTTP → HTTPS..."
         
         # Modifica il file del virtual host HTTP
