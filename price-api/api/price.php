@@ -4,7 +4,7 @@
 // Includi file necessari
 require_once '../includes/config.php';
 require_once '../includes/database.php';
-require_once '../includes/jwt_helper.php';
+require_once '../includes/helpers/jwt_helper.php';
 
 // Imposta headers per la risposta
 set_api_headers();
