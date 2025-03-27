@@ -34,7 +34,7 @@ $page_title = "Priceradarcloud - Home";
 </head>
 <body>
     <div class="logo-container">
-        <img src="logo.jpeg" alt="Priceradarcloud Price Comparison Platform" class="logo">
+        <img src="/logo.jpeg" alt="Priceradarcloud Price Comparison Platform" class="logo">
     </div>
 </body>
 </html>
