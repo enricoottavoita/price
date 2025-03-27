@@ -140,7 +140,7 @@ $total_tokens_revoked = 0;
                             </tbody>
                         </table>
                     </div>
-                    <a href="cleanup_tokens.php?cleanup=1" class="btn btn-warning" onclick="return confirm('Sei sicuro di voler revocare i token duplicati?');">
+                    <a href="cleanup_tokens.php?cleanup=1" class="btn btn-warning confirm-action" onclick="return confirm('Sei sicuro di voler revocare i token duplicati?');">
                         <i class="fas fa-broom me-1"></i> Esegui pulizia dei token duplicati
                     </a>
                 <?php endif; ?>

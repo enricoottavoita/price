@@ -30,6 +30,17 @@ $stmt = $conn->prepare("SELECT COUNT(*) as recent_prices FROM prices WHERE creat
 $stmt->execute();
 $recent_prices = $stmt->fetch(PDO::FETCH_ASSOC)['recent_prices'];
 
+// Conta token duplicati
+$stmt = $conn->query("
+    SELECT COUNT(DISTINCT u.client_id) as duplicate_count
+    FROM users u
+    JOIN tokens t ON u.id = t.user_id
+    WHERE t.revoked = 0 AND t.expires_at > NOW()
+    GROUP BY u.client_id
+    HAVING COUNT(t.id) > 1
+");
+$duplicate_count = $stmt->fetchColumn() ?: 0;
+
 // Ottieni statistiche per paese
 $stmt = $conn->prepare("SELECT country, COUNT(*) as count FROM prices GROUP BY country");
 $stmt->execute();
@@ -54,7 +65,7 @@ include 'includes/header.php';
 <div class="container-fluid px-4">
     <!-- Statistiche principali -->
     <div class="row g-3 my-3">
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="card text-white bg-primary card-stats">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
@@ -74,7 +85,7 @@ include 'includes/header.php';
             </div>
         </div>
         
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="card text-white bg-success card-stats">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
@@ -94,7 +105,7 @@ include 'includes/header.php';
             </div>
         </div>
         
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="card text-white bg-info card-stats">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
@@ -109,6 +120,27 @@ include 'includes/header.php';
                 </div>
                 <div class="card-footer d-flex align-items-center justify-content-between">
                     <a href="prices.php" class="small text-white stretched-link">Visualizza Dettagli</a>
+                    <div class="small text-white"><i class="bi bi-chevron-right"></i></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Nuova card per i token duplicati -->
+        <div class="col-md-3">
+            <div class="card text-white bg-warning card-stats">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="card-title">Token Duplicati</h6>
+                            <h2 class="my-2"><?php echo number_format($duplicate_count); ?></h2>
+                        </div>
+                        <div class="fs-1 text-white-50">
+                            <i class="bi bi-broom"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer d-flex align-items-center justify-content-between">
+                    <a href="cleanup_tokens.php" class="small text-white stretched-link">Visualizza Dettagli</a>
                     <div class="small text-white"><i class="bi bi-chevron-right"></i></div>
                 </div>
             </div>

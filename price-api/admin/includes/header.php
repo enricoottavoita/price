@@ -42,6 +42,30 @@
                                 <i class="bi bi-key me-2"></i>Token
                             </a>
                         </li>
+                        <!-- Nuova voce di menu per la pulizia dei token -->
+                        <li class="nav-item">
+                            <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'cleanup_tokens.php' ? 'active' : ''; ?>" href="cleanup_tokens.php">
+                                <i class="bi bi-trash"></i>Pulizia Token
+                                <?php
+                                // Mostra badge se ci sono token duplicati
+                                if (isset($conn)) {
+                                    $stmt = $conn->query("
+                                        SELECT COUNT(DISTINCT u.client_id) as duplicate_count
+                                        FROM users u
+                                        JOIN tokens t ON u.id = t.user_id
+                                        WHERE t.revoked = 0 AND t.expires_at > NOW()
+                                        GROUP BY u.client_id
+                                        HAVING COUNT(t.id) > 1
+                                    ");
+                                    $duplicate_count = $stmt->fetchColumn() ?: 0;
+                                    
+                                    if ($duplicate_count > 0) {
+                                        echo '<span class="badge bg-warning rounded-pill ms-2">' . $duplicate_count . '</span>';
+                                    }
+                                }
+                                ?>
+                            </a>
+                        </li>
                         <li class="nav-item">
                             <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'settings.php' ? 'active' : ''; ?>" href="settings.php">
                                 <i class="bi bi-gear me-2"></i>Impostazioni
