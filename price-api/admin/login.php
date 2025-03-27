@@ -133,7 +133,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             border-top-right-radius: 0;
         }
         .login-logo {
-            width: 650px;
+            width: autopx;
             height: autopx;
             margin-bottom: 1rem;
         }
