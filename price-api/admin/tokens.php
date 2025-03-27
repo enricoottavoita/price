@@ -7,13 +7,25 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     exit;
 }
 
-// Includi file di configurazione e database
-require_once '../includes/config.php';
-require_once '../includes/database.php';
+// Includi file di configurazione e database con percorsi assoluti
+require_once '/var/www/price-api/includes/config.php';
+require_once '/var/www/price-api/includes/database.php';
 
 // Connessione al database
 $db = new Database();
 $conn = $db->getConnection();
+
+// Conta i client con token duplicati
+$stmt = $conn->query("
+    SELECT COUNT(DISTINCT u.client_id) as duplicate_count
+    FROM users u
+    JOIN tokens t ON u.id = t.user_id
+    WHERE t.revoked = 0 AND t.expires_at > NOW()
+    GROUP BY u.client_id
+    HAVING COUNT(t.id) > 1
+");
+
+$duplicate_count = $stmt->fetchColumn() ?: 0;
 
 // Genera un token CSRF se non esiste
 if (!isset($_SESSION['csrf_token'])) {
@@ -130,11 +142,20 @@ $tokens = $stmt->fetchAll(PDO::FETCH_ASSOC);
 // Titolo pagina
 $page_title = 'Gestione Token';
 
-// Includi header
-include 'includes/header.php';
+// Includi header con percorso assoluto
+include '/var/www/price-api/admin/includes/header.php';
 ?>
 
 <div class="container-fluid px-4">
+    <h1 class="mt-4">
+        Gestione Token
+        <?php if ($duplicate_count > 0): ?>
+            <a href="cleanup_tokens.php" class="badge bg-warning text-decoration-none ms-2">
+                <?php echo $duplicate_count; ?> client con token duplicati
+            </a>
+        <?php endif; ?>
+    </h1>
+
     <div class="row mb-4">
         <div class="col-md-8">
             <div class="card">
@@ -206,6 +227,12 @@ include 'includes/header.php';
                 </div>
             </div>
         </div>
+    </div>
+
+    <div class="mb-3 text-end">
+        <a href="cleanup_tokens.php" class="btn btn-warning btn-sm">
+            <i class="fas fa-broom me-1"></i> Pulizia Token Duplicati
+        </a>
     </div>
 
     <div class="card mb-4">
@@ -352,4 +379,4 @@ include 'includes/header.php';
     </div>
 </div>
 
-<?php include 'includes/footer.php'; ?>
+<?php include '/var/www/price-api/admin/includes/footer.php'; ?>

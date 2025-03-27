@@ -62,7 +62,43 @@ try {
         exit;
     }
     
-    // Genera un nuovo token
+    // MODIFICA: Verifica se esiste già un token valido per questo utente
+    $stmt = $conn->prepare("
+        SELECT token, TIMESTAMPDIFF(SECOND, NOW(), expires_at) as remaining_seconds
+        FROM tokens 
+        WHERE user_id = :user_id 
+        AND revoked = 0 
+        AND expires_at > NOW()
+        ORDER BY created_at DESC 
+        LIMIT 1
+    ");
+    $stmt->bindParam(':user_id', $user['id']);
+    $stmt->execute();
+    
+    // Se esiste un token valido, restituiscilo invece di crearne uno nuovo
+    if ($stmt->rowCount() > 0) {
+        $token_data = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        // Aggiorna ultimo accesso utente
+        $stmt = $conn->prepare("UPDATE users SET last_login = NOW() WHERE id = :id");
+        $stmt->bindParam(':id', $user['id']);
+        $stmt->execute();
+        
+        // Prepara la risposta con il token esistente
+        $response = [
+            'success' => true,
+            'message' => 'Token esistente valido',
+            'token' => $token_data['token'],
+            'expires_in' => max(0, $token_data['remaining_seconds'])
+        ];
+        
+        // Invia la risposta
+        http_response_code(200); // OK
+        echo json_encode($response);
+        exit;
+    }
+    
+    // Se non esiste un token valido, genera un nuovo token
     $token = JWTHelper::generateToken($user['id'], $user['client_id']);
     
     // Salva il token nel database
