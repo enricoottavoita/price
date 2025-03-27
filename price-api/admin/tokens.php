@@ -7,7 +7,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     exit;
 }
 
-// Includi file di configurazione e database con percorsi assoluti
+// Includi file di configurazione e database
 require_once '/var/www/price-api/includes/config.php';
 require_once '/var/www/price-api/includes/database.php';
 
@@ -142,7 +142,7 @@ $tokens = $stmt->fetchAll(PDO::FETCH_ASSOC);
 // Titolo pagina
 $page_title = 'Gestione Token';
 
-// Includi header con percorso assoluto
+// Includi header
 include '/var/www/price-api/admin/includes/header.php';
 ?>
 
@@ -155,6 +155,19 @@ include '/var/www/price-api/admin/includes/header.php';
             </a>
         <?php endif; ?>
     </h1>
+    
+    <ol class="breadcrumb mb-4">
+        <li class="breadcrumb-item"><a href="index.php">Dashboard</a></li>
+        <li class="breadcrumb-item active">Gestione Token</li>
+    </ol>
+
+    <?php if (isset($_SESSION['message'])): ?>
+        <div class="alert alert-<?php echo $_SESSION['message_type']; ?> alert-dismissible fade show" role="alert">
+            <?php echo $_SESSION['message']; ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        <?php unset($_SESSION['message'], $_SESSION['message_type']); ?>
+    <?php endif; ?>
 
     <div class="row mb-4">
         <div class="col-md-8">
