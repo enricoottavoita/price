@@ -1,81 +1,90 @@
 <?php
-// File: /var/www/price-api/api/verify_token.php
+// Abilita CORS
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+header("Content-Type: application/json");
 
-// Impostazioni di debug
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
-// Headers
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-
-// Gestione richiesta OPTIONS (preflight CORS)
+// Gestisci le richieste OPTIONS (pre-flight)
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// Solo richieste POST
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode([
-        'status' => 'error',
-        'message' => 'Solo richieste POST sono supportate'
-    ]);
+// Includi il file di configurazione
+require_once '../includes/config.php';
+
+// Includi funzioni di utilità
+require_once '../includes/functions.php';
+
+// Ottieni l'Authorization header
+$authHeader = getAuthorizationHeader();
+$token = null;
+
+// Estrai il token dal header (formato "Bearer [token]")
+if (!empty($authHeader)) {
+    if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+        $token = $matches[1];
+    }
+}
+
+// Se non c'è token, restituisci errore
+if (!$token) {
+    echo json_encode(['status' => 'error', 'message' => 'Token mancante']);
     exit;
 }
 
-// Ottieni il token dall'header Authorization
-$headers = getallheaders();
-$auth_header = isset($headers['Authorization']) ? $headers['Authorization'] : '';
-$token = '';
+// Ricevi il client_id dal body della richiesta
+$data = json_decode(file_get_contents('php://input'), true);
+$client_id = isset($data['client_id']) ? $data['client_id'] : null;
 
-if (preg_match('/Bearer\s(\S+)/', $auth_header, $matches)) {
-    $token = $matches[1];
-}
-
-// Leggi i dati inviati
-$input = file_get_contents('php://input');
-$data = json_decode($input, true);
-
-// Verifica dati
-if (!$data || !isset($data['client_id']) || empty($token)) {
-    echo json_encode([
-        'status' => 'error',
-        'message' => 'Dati mancanti o non validi',
-        'valid' => false
-    ]);
+if (!$client_id) {
+    echo json_encode(['status' => 'error', 'message' => 'Client ID mancante']);
     exit;
 }
-
-// Connessione al database (sostituisci con i tuoi parametri)
-$db_host = 'localhost';
-$db_name = 'price_radar';
-$db_user = 'price_radar_user';
-$db_pass = 'your_password';
 
 try {
+    // Connessione al database usando i parametri da config.php
     $pdo = new PDO("mysql:host=$db_host;dbname=$db_name", $db_user, $db_pass);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
-    // Verifica il token nel database
-    $stmt = $pdo->prepare("SELECT * FROM tokens WHERE token = ? AND client_id = ? AND expires_at > NOW()");
-    $stmt->execute([$token, $data['client_id']]);
+    // Verifica se il token esiste e non è scaduto
+    $stmt = $pdo->prepare("SELECT * FROM auth_tokens WHERE token = ? AND client_id = ? AND expires_at > NOW()");
+    $stmt->execute([$token, $client_id]);
+    $tokenRecord = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    $isValid = $stmt->rowCount() > 0;
-    
-    echo json_encode([
-        'status' => 'success',
-        'valid' => $isValid,
-        'message' => $isValid ? 'Token valido' : 'Token non valido o scaduto'
-    ]);
+    if ($tokenRecord) {
+        // Token valido
+        echo json_encode(['status' => 'success', 'valid' => true]);
+    } else {
+        // Token non valido o scaduto
+        echo json_encode(['status' => 'success', 'valid' => false]);
+    }
 } catch (PDOException $e) {
-    // In caso di errore del database, consideriamo il token non valido
-    echo json_encode([
-        'status' => 'error',
-        'message' => 'Errore di verifica del token',
-        'valid' => false
-    ]);
+    // Errore di connessione al database
+    echo json_encode(['status' => 'error', 'message' => 'Errore del database: ' . $e->getMessage()]);
+}
+
+// Funzione per ottenere l'header di autorizzazione
+function getAuthorizationHeader() {
+    $headers = null;
+    
+    if (isset($_SERVER['Authorization'])) {
+        $headers = trim($_SERVER['Authorization']);
+    } else if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        $headers = trim($_SERVER['HTTP_AUTHORIZATION']);
+    } else if (function_exists('apache_request_headers')) {
+        $requestHeaders = apache_request_headers();
+        $requestHeaders = array_combine(
+            array_map('ucwords', array_keys($requestHeaders)),
+            array_values($requestHeaders)
+        );
+        
+        if (isset($requestHeaders['Authorization'])) {
+            $headers = trim($requestHeaders['Authorization']);
+        }
+    }
+    
+    return $headers;
 }
 ?>
