@@ -66,7 +66,7 @@ try {
     }
     
     // Verifica che il paese sia valido
-    if (!in_array($country, ['it', 'de', 'fr', 'es', 'uk'])) {
+    if (!in_array($country, ['it', 'de', 'fr', 'es'])) {
         http_response_code(400);
         echo json_encode(['status' => 'error', 'message' => 'Paese non valido']);
         exit;
